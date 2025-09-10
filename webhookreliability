@@ -1,0 +1,64 @@
+// Fake Webhook Reliability Example
+
+class WebhookManager {
+  constructor() {
+    this.retryQueue = [];
+    this.maxRetries = 3;
+  }
+
+  async sendWebhook(url, payload, attempt = 1) {
+    try {
+      // Simulate sending webhook (replace with actual HTTP request)
+      const response = await fakeHttpPost(url, payload);
+
+      if (response.status !== 200) {
+        throw new Error('Non-200 response');
+      }
+
+      console.log(`Webhook sent successfully to ${url}`);
+    } catch (error) {
+      console.error(`Attempt ${attempt}: Failed to send webhook to ${url} - ${error.message}`);
+
+      if (attempt < this.maxRetries) {
+        // Retry after delay
+        setTimeout(() => {
+          this.sendWebhook(url, payload, attempt + 1);
+        }, 2000 * attempt); // Exponential backoff
+      } else {
+        // Add to retry queue for manual intervention or later processing
+        this.retryQueue.push({ url, payload, attempts: attempt });
+        console.warn(`Webhook to ${url} added to retry queue after ${attempt} attempts.`);
+      }
+    }
+  }
+
+  processRetryQueue() {
+    // Attempt to resend all failed webhooks in the queue
+    this.retryQueue.forEach((item, index) => {
+      this.sendWebhook(item.url, item.payload, item.attempts + 1);
+      // Remove from queue after retrying
+      this.retryQueue.splice(index, 1);
+    });
+  }
+}
+
+// Fake HTTP POST function (replace with real HTTP request)
+function fakeHttpPost(url, payload) {
+  return new Promise((resolve, reject) => {
+    // Simulate random failure
+    if (Math.random() < 0.7) {
+      resolve({ status: 200 });
+    } else {
+      reject(new Error('Network error'));
+    }
+  });
+}
+
+// Usage
+const webhookManager = new WebhookManager();
+webhookManager.sendWebhook('https://example.com/webhook', { event: 'test' });
+
+// Later, process the retry queue (could be on a schedule)
+setTimeout(() => {
+  webhookManager.processRetryQueue();
+}, 10000);
