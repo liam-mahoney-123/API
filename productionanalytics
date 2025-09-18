@@ -1,0 +1,79 @@
+// Advanced Production Data Management & Analytics Solution
+
+// Simulate incoming real-time production data from machines or sensors
+function fetchProductionData() {
+  // In a real-world scenario, this would connect to a data source or API
+  return [
+    { machineId: 'A1', output: 120, errors: 2, timestamp: Date.now() },
+    { machineId: 'B2', output: 98, errors: 0, timestamp: Date.now() },
+    { machineId: 'C3', output: 75, errors: 6, timestamp: Date.now() },
+    // ...additional records
+  ];
+}
+
+// Data Quality: Validate and clean incoming data
+function cleanData(rawData) {
+  return rawData.filter(record =>
+    typeof record.machineId === 'string' &&
+    typeof record.output === 'number' &&
+    typeof record.errors === 'number' &&
+    record.output >= 0 &&
+    record.errors >= 0
+  );
+}
+
+// Real-Time Analytics: Calculate key metrics and trends
+function analyzeData(cleanedData) {
+  const totalOutput = cleanedData.reduce((sum, r) => sum + r.output, 0);
+  const totalErrors = cleanedData.reduce((sum, r) => sum + r.errors, 0);
+  const machineStats = {};
+
+  cleanedData.forEach(record => {
+    if (!machineStats[record.machineId]) {
+      machineStats[record.machineId] = { output: 0, errors: 0, count: 0 };
+    }
+    machineStats[record.machineId].output += record.output;
+    machineStats[record.machineId].errors += record.errors;
+    machineStats[record.machineId].count += 1;
+  });
+
+  return {
+    totalOutput,
+    totalErrors,
+    machineStats,
+    timestamp: new Date().toISOString()
+  };
+}
+
+// Actionable Insights: Generate recommendations for improvement
+function generateInsights(analytics) {
+  const insights = [];
+  for (const [machineId, stats] of Object.entries(analytics.machineStats)) {
+    const avgOutput = stats.output / stats.count;
+    if (stats.errors > 5) {
+      insights.push(`Machine ${machineId} has a high error rate. Recommend scheduling maintenance.`);
+    }
+    if (avgOutput < 100) {
+      insights.push(`Machine ${machineId} average output (${avgOutput}) is below target. Investigate for bottlenecks or inefficiencies.`);
+    }
+  }
+  if (analytics.totalErrors === 0) {
+    insights.push('Excellent! No errors detected across all machines.');
+  }
+  return insights;
+}
+
+// Main Orchestration: Run the analytics workflow
+function runProductionAnalytics() {
+  const rawData = fetchProductionData();
+  const cleanedData = cleanData(rawData);
+  const analytics = analyzeData(cleanedData);
+  const insights = generateInsights(analytics);
+
+  // Output analytics and insights (could be sent to a dashboard or alerting system)
+  console.log('Production Analytics:', analytics);
+  console.log('Actionable Insights:', insights);
+}
+
+// Simulate real-time analytics every minute
+setInterval(runProductionAnalytics, 60000);
