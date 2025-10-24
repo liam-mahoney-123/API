@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Chess Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .chess-board {
+            display: grid;
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
+            gap: 0;
+            border: 3px solid #8b4513;
+            margin: 20px auto;
+        }
+        
+        .square {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2.5em;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .square.light {
+            background-color: #f0d9b5;
+        }
+        
+        .square.dark {
+            background-color: #b58863;
+        }
+        
+        .square:hover {
+            opacity: 0.8;
+        }
+        
+        .square.selected {
+            background-color: #7fb069 !important;
+            box-shadow: inset 0 0 0 3px #5a8a4a;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 0 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        .game-info {
+            text-align: center;
+            margin: 10px 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>♔ Simple Chess Game ♛</h1>
+        
+        <div class="game-info">
+            <div id="current-player">White's Turn</div>
+        </div>
+        
+        <div class="chess-board" id="chess-board"></div>
+        
+        <div class="controls">
+            <button onclick="startNewGame()">New Game</button>
+            <button onclick="testBoard()">Test Board</button>
+        </div>
+        
+        <div id="status" style="text-align: center; margin-top: 10px;"></div>
+    </div>
+
+    <script>
+        // Simple chess pieces
+        const pieces = {
+            white: {
+                king: '♔', queen: '♕', rook: '♖', 
+                bishop: '♗', knight: '♘', pawn: '♙'
+            },
+            black: {
+                king: '♚', queen: '♛', rook: '♜', 
+                bishop: '♝', knight: '♞', pawn: '♟'
+            }
+        };
+
+        let board = [];
+        let currentPlayer = 'white';
+        let selectedSquare = null;
+
+        function initializeBoard() {
+            board = Array(8).fill(null).map(() => Array(8).fill(null));
+            
+            // Set up initial positions
+            const setup = [
+                ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'],
+                ['pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn']
+            ];
+            
+            // Black pieces
+            for (let col = 0; col < 8; col++) {
+                board[0][col] = { type: setup[0][col], color: 'black' };
+                board[1][col] = { type: setup[1][col], color: 'black' };
+            }
+            
+            // White pieces
+            for (let col = 0; col < 8; col++) {
+                board[6][col] = { type: setup[1][col], color: 'white' };
+                board[7][col] = { type: setup[0][col], color: 'white' };
+            }
+        }
+
+        function createBoard() {
+            const boardElement = document.getElementById('chess-board');
+            boardElement.innerHTML = '';
+            
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const square = document.createElement('div');
+                    square.className = `square ${(row + col) % 2 === 0 ? 'light' : 'dark'}`;
+                    square.dataset.row = row;
+                    square.dataset.col = col;
+                    square.addEventListener('click', () => handleSquareClick(row, col));
+                    
+                    const piece = board[row][col];
+                    if (piece) {
+                        square.textContent = pieces[piece.color][piece.type];
+                    }
+                    
+                    boardElement.appendChild(square);
+                }
+            }
+            
+            document.getElementById('status').textContent = 'Board created successfully!';
+        }
+
+        function handleSquareClick(row, col) {
+            const piece = board[row][col];
+            
+            if (selectedSquare) {
+                // Try to make a move
+                const [fromRow, fromCol] = selectedSquare;
+                
+                if (fromRow === row && fromCol === col) {
+                    // Deselect
+                    clearSelection();
+                    return;
+                }
+                
+                // Simple move (just move any piece anywhere for testing)
+                board[row][col] = board[fromRow][fromCol];
+                board[fromRow][fromCol] = null;
+                
+                clearSelection();
+                currentPlayer = currentPlayer === 'white' ? 'black' : 'white';
+                updateGameInfo();
+                createBoard();
+            } else {
+                // Select piece
+                if (piece && piece.color === currentPlayer) {
+                    selectedSquare = [row, col];
+                    const square = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                    square.classList.add('selected');
+                }
+            }
+        }
+
+        function clearSelection() {
+            selectedSquare = null;
+            document.querySelectorAll('.square').forEach(square => {
+                square.classList.remove('selected');
+            });
+        }
+
+        function updateGameInfo() {
+            document.getElementById('current-player').textContent = 
+                currentPlayer === 'white' ? "White's Turn" : "Black's Turn";
+        }
+
+        function startNewGame() {
+            try {
+                document.getElementById('status').textContent = 'Starting new game...';
+                initializeBoard();
+                createBoard();
+                currentPlayer = 'white';
+                updateGameInfo();
+                clearSelection();
+                document.getElementById('status').textContent = 'New game started! Click pieces to move them.';
+            } catch (error) {
+                document.getElementById('status').textContent = 'Error: ' + error.message;
+                console.error('Error starting game:', error);
+            }
+        }
+
+        function testBoard() {
+            document.getElementById('status').textContent = 'Testing board creation...';
+            const boardElement = document.getElementById('chess-board');
+            boardElement.innerHTML = '<div style="grid-column: span 8; text-align: center; padding: 20px;">Test: Board element found!</div>';
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('status').textContent = 'Page loaded, initializing...';
+            startNewGame();
+        });
+    </script>
+</body>
+</html>
