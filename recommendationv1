@@ -1,0 +1,20 @@
+def get_recommendations(user_id, purchase_history, product_catalog):
+    """
+    Returns a list of recommended products for a user based on their purchase history.
+    """
+    recommendations = []
+    for product in product_catalog:
+        # Recommend products the user hasn't purchased yet
+        if product not in purchase_history:
+            recommendations.append(product)
+
+    # BUG: This line should return 'recommendations', but mistakenly returns 'purchase_history'
+    return purchase_history
+
+# Example usage:
+user_id = 123
+purchase_history = ['laptop', 'mouse']
+product_catalog = ['laptop', 'mouse', 'keyboard', 'monitor', 'webcam']
+
+recommended = get_recommendations(user_id, purchase_history, product_catalog)
+print("Recommended products:", recommended)
