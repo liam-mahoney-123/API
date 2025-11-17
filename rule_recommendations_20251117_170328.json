@@ -1,0 +1,71 @@
+{
+  "generated_at": "2025-11-17T17:03:28.764726",
+  "total_recommendations": 2,
+  "recommendations": [
+    {
+      "rule_id": "rule_3db6023b",
+      "rule_type": "behavioral_analysis",
+      "name": "Device Verification Rule - unknown_",
+      "description": "Verify transactions from unrecognized or suspicious devices",
+      "conditions": {
+        "device_fingerprint": {
+          "operator": "not_in",
+          "value": "known_devices"
+        },
+        "device_risk_score": {
+          "operator": ">",
+          "value": 0.6
+        },
+        "first_time_device": true
+      },
+      "actions": [
+        "require_device_verification",
+        "send_sms_code",
+        "flag_for_review"
+      ],
+      "confidence_score": 0.9285816871015845,
+      "risk_level": "medium",
+      "estimated_impact": {
+        "fraud_prevention": 0.68,
+        "false_positive_rate": 0.22,
+        "processing_delay": 4.1
+      },
+      "reasoning": "Device risk detected (0.70). Unrecognized device fingerprint requires additional verification.",
+      "created_at": "2025-11-17T17:03:28.764223"
+    },
+    {
+      "rule_id": "rule_03c187c3",
+      "rule_type": "behavioral_analysis",
+      "name": "Behavioral Anomaly Rule - user_67890",
+      "description": "Detect behavioral patterns that deviate from user's normal activity",
+      "conditions": {
+        "transaction_time": {
+          "operator": "outside",
+          "value": "normal_hours"
+        },
+        "merchant_category": {
+          "operator": "not_in",
+          "value": "frequent_categories"
+        },
+        "behavioral_score": {
+          "operator": ">",
+          "value": 0.7
+        }
+      },
+      "actions": [
+        "flag_transaction",
+        "behavioral_analysis",
+        "user_verification"
+      ],
+      "confidence_score": 0.8908299108699288,
+      "risk_level": "medium",
+      "estimated_impact": {
+        "fraud_prevention": 0.65,
+        "false_positive_rate": 0.25,
+        "processing_delay": 2.8
+      },
+      "reasoning": "Behavioral anomaly detected (0.60). Transaction pattern deviates from user's normal behavior.",
+      "created_at": "2025-11-17T17:03:28.764243"
+    }
+  ]
+}
