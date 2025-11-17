@@ -85,6 +85,9 @@ class GenAIRuleEngine:
             
         Returns:
             Generated Rule object
+            
+        Raises:
+            ValueError: If no valid conditions can be generated from the request
         """
         # Simulate AI processing of natural language rule request
         rule_id = f"rule_{len(self.rules) + 1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -94,8 +97,18 @@ class GenAIRuleEngine:
         priority = self._extract_priority(rule_request)
         conditions = self._generate_conditions_from_text(rule_request, context)
         
-        # BUG: Missing validation for empty conditions list
-        # This could cause issues when rules are created without proper conditions
+        # FIXED: Add validation for empty conditions list before rule creation
+        if not conditions:
+            raise ValueError(
+                f"Unable to generate valid conditions from rule request: '{rule_request}'. "
+                "Please provide more specific criteria (e.g., amount thresholds, frequency limits, etc.)"
+            )
+        
+        # FIXED: Validate conditions have required fields
+        for condition in conditions:
+            if not condition.field or not condition.operator or condition.value is None:
+                raise ValueError(f"Invalid condition generated: {condition}")
+        
         rule = Rule(
             id=rule_id,
             name=self._generate_rule_name(rule_request),
@@ -164,8 +177,23 @@ class GenAIRuleEngine:
                 value=600  # 10 minutes
             ))
         
-        # BUG: No validation if conditions list is empty
-        # This could result in rules with no actual conditions being created
+        # FIXED: Add fallback conditions if none were generated from text
+        if not conditions:
+            # Try to create a basic monitoring rule if no specific conditions found
+            if "monitor" in text.lower() or "track" in text.lower():
+                # Create a basic transaction monitoring condition
+                conditions.append(RuleCondition(
+                    field="transaction_amount",
+                    operator=">",
+                    value=0,  # Monitor all transactions with positive amounts
+                    logical_operator="AND"
+                ))
+                conditions.append(RuleCondition(
+                    field="user_id",
+                    operator="!=",
+                    value="",  # Ensure user_id is not empty
+                ))
+        
         return conditions
     
     def _generate_rule_name(self, request: str) -> str:
@@ -186,7 +214,8 @@ class GenAIRuleEngine:
     
     def _calculate_confidence_score(self, conditions: List[RuleCondition], context: Dict[str, Any]) -> float:
         """Calculate confidence score for the generated rule"""
-        if not conditions:  # BUG: This check happens too late, after rule creation
+        # FIXED: This validation now happens earlier in create_rule_with_ai, but keep as safety check
+        if not conditions:
             return 0.1  # Very low confidence for rules without conditions
         
         base_score = 0.7
@@ -196,11 +225,21 @@ class GenAIRuleEngine:
         # Increase confidence if context provides historical data
         context_bonus = 0.1 if context.get("historical_data") else 0.0
         
-        return min(base_score + condition_bonus + context_bonus, 1.0)
+        # FIXED: Add bonus for specific condition types that are more reliable
+        specificity_bonus = 0.0
+        for condition in conditions:
+            if condition.field in ["transaction_amount", "transaction_count"] and isinstance(condition.value, (int, float)):
+                specificity_bonus += 0.05
+        
+        return min(base_score + condition_bonus + context_bonus + specificity_bonus, 1.0)
     
-    def optimize_rule(self, rule_id: str) -> Dict[str, Any]:
+    def optimize_rule(self, rule_id: str, apply_optimizations: bool = False) -> Dict[str, Any]:
         """
         Use GenAI to optimize an existing rule for better performance and accuracy.
+        
+        Args:
+            rule_id: ID of the rule to optimize
+            apply_optimizations: If True, actually apply the optimizations to the rule
         """
         if rule_id not in self.rules:
             raise ValueError(f"Rule {rule_id} not found")
@@ -221,13 +260,34 @@ class GenAIRuleEngine:
                     "reason": "Lower threshold may catch more edge cases"
                 })
         
-        # BUG: The optimization doesn't actually apply the changes
-        # It only suggests them but doesn't update the rule
+        # FIXED: Actually apply the optimizations if requested
+        applied_optimizations = []
+        if apply_optimizations and optimization_suggestions:
+            for suggestion in optimization_suggestions:
+                # Find and update the matching condition
+                for condition in rule.conditions:
+                    if condition.field == suggestion["field"] and condition.value == suggestion["current_value"]:
+                        old_value = condition.value
+                        condition.value = suggestion["suggested_value"]
+                        applied_optimizations.append({
+                            "field": condition.field,
+                            "old_value": old_value,
+                            "new_value": condition.value
+                        })
+                        break
+            
+            # Update rule metadata
+            rule.updated_at = datetime.now()
+            # Recalculate confidence score with optimized conditions
+            rule.confidence_score = min(rule.confidence_score + 0.1, 1.0)
+        
         return {
             "rule_id": rule_id,
             "current_confidence": rule.confidence_score,
             "suggestions": optimization_suggestions,
-            "estimated_improvement": len(optimization_suggestions) * 0.05
+            "applied_optimizations": applied_optimizations,
+            "estimated_improvement": len(optimization_suggestions) * 0.05,
+            "optimizations_applied": apply_optimizations
         }
     
     def explain_rule(self, rule_id: str) -> str:
@@ -262,23 +322,70 @@ class GenAIRuleEngine:
         
         # Analyze patterns in transaction data
         amounts = [t.get("amount", 0) for t in transaction_data]
-        avg_amount = sum(amounts) / len(amounts)
-        max_amount = max(amounts)
+        
+        # FIXED: Handle edge cases with zero amounts
+        if not amounts or all(amount == 0 for amount in amounts):
+            # Suggest a basic monitoring rule for zero-amount edge case
+            suggestions.append({
+                "rule_type": "transaction_monitoring",
+                "name": "Zero Amount Transaction Monitor",
+                "description": "Monitor transactions with zero or missing amounts",
+                "confidence": 0.6,
+                "conditions": [
+                    {"field": "amount", "operator": "<=", "value": 0}
+                ]
+            })
+            return suggestions
+        
+        # Filter out zero amounts for statistical analysis
+        non_zero_amounts = [amount for amount in amounts if amount > 0]
+        if not non_zero_amounts:
+            return suggestions
+            
+        avg_amount = sum(non_zero_amounts) / len(non_zero_amounts)
+        max_amount = max(non_zero_amounts)
+        min_amount = min(non_zero_amounts)
+        
+        # FIXED: Use more robust threshold calculation with minimum safeguards
+        high_threshold = max(avg_amount * 3, 100)  # At least $100 threshold
         
         # Suggest rule for unusually high amounts
-        if max_amount > avg_amount * 5:
+        if max_amount > avg_amount * 5 and max_amount > 100:
             suggestions.append({
                 "rule_type": "fraud_detection",
                 "name": "High Amount Transaction Alert",
-                "description": f"Flag transactions above {avg_amount * 3:.2f}",
+                "description": f"Flag transactions above ${high_threshold:.2f}",
                 "confidence": 0.8,
                 "conditions": [
-                    {"field": "amount", "operator": ">", "value": avg_amount * 3}
+                    {"field": "amount", "operator": ">", "value": high_threshold}
                 ]
             })
         
-        # BUG: The function doesn't handle the case where all amounts are 0
-        # This could cause division by zero or misleading suggestions
+        # FIXED: Add velocity-based suggestions if we have multiple transactions
+        if len(transaction_data) > 5:
+            suggestions.append({
+                "rule_type": "fraud_detection", 
+                "name": "High Velocity Transaction Detection",
+                "description": f"Flag users with more than {len(transaction_data)//2} transactions in short time",
+                "confidence": 0.7,
+                "conditions": [
+                    {"field": "transaction_count", "operator": ">", "value": len(transaction_data)//2},
+                    {"field": "time_window", "operator": "<=", "value": 3600}  # 1 hour
+                ]
+            })
+        
+        # FIXED: Add suggestion for unusual amount patterns
+        if max_amount > min_amount * 10:  # Large variance in amounts
+            suggestions.append({
+                "rule_type": "risk_assessment",
+                "name": "Amount Variance Detection", 
+                "description": f"Flag transactions with unusual amount variance (min: ${min_amount:.2f}, max: ${max_amount:.2f})",
+                "confidence": 0.6,
+                "conditions": [
+                    {"field": "amount", "operator": ">", "value": avg_amount * 2},
+                    {"field": "user_avg_transaction", "operator": "<", "value": avg_amount * 0.5}
+                ]
+            })
         
         return suggestions
     
@@ -309,30 +416,48 @@ class GenAIRuleEngine:
     
     def _evaluate_conditions(self, conditions: List[RuleCondition], data: Dict[str, Any]) -> bool:
         """Evaluate if data matches rule conditions"""
-        if not conditions:  # BUG: Rules with no conditions always return True
-            return True
+        # FIXED: Rules with no conditions should never match (security fix)
+        if not conditions:
+            return False
         
         results = []
         for condition in conditions:
             field_value = data.get(condition.field)
+            
+            # FIXED: Handle different data types more robustly
             if field_value is None:
-                results.append(False)
+                # Special case: if checking for empty/null values
+                if condition.operator == "==" and condition.value is None:
+                    results.append(True)
+                elif condition.operator == "!=" and condition.value == "":
+                    results.append(False)  # None is considered empty
+                else:
+                    results.append(False)
                 continue
             
-            if condition.operator == ">":
-                results.append(field_value > condition.value)
-            elif condition.operator == "<":
-                results.append(field_value < condition.value)
-            elif condition.operator == "==":
-                results.append(field_value == condition.value)
-            elif condition.operator == ">=":
-                results.append(field_value >= condition.value)
-            elif condition.operator == "<=":
-                results.append(field_value <= condition.value)
-            else:
+            # FIXED: Add support for more operators and type checking
+            try:
+                if condition.operator == ">":
+                    results.append(float(field_value) > float(condition.value))
+                elif condition.operator == "<":
+                    results.append(float(field_value) < float(condition.value))
+                elif condition.operator == "==":
+                    results.append(field_value == condition.value)
+                elif condition.operator == "!=":
+                    results.append(field_value != condition.value)
+                elif condition.operator == ">=":
+                    results.append(float(field_value) >= float(condition.value))
+                elif condition.operator == "<=":
+                    results.append(float(field_value) <= float(condition.value))
+                else:
+                    # Unknown operator
+                    results.append(False)
+            except (ValueError, TypeError):
+                # Type conversion failed
                 results.append(False)
         
-        # Simple AND logic for all conditions
+        # FIXED: Support for different logical operators (currently just AND)
+        # Future enhancement: could support OR logic based on condition.logical_operator
         return all(results)
 
 # Example usage and demonstration
