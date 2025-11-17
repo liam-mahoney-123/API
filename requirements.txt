@@ -1,0 +1,17 @@
+# NextGen Rule Recommendation Engine Dependencies
+# Core dependencies
+python-dateutil>=2.8.0
+typing-extensions>=4.0.0
+
+# Optional dependencies for enhanced functionality
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+requests>=2.25.0
+
+# Development dependencies
+pytest>=6.0.0
+pytest-cov>=2.12.0
+black>=21.0.0
+flake8>=3.9.0
+mypy>=0.910
