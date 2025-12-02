@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adaptive Payment Interface</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .payment-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .payment-header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .payment-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .payment-header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .payment-content {
+            padding: 40px;
+        }
+
+        .payment-summary {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border-left: 5px solid #4facfe;
+        }
+
+        .amount-display {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .payment-methods {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .payment-method {
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .payment-method:hover {
+            border-color: #4facfe;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(79, 172, 254, 0.1);
+        }
+
+        .payment-method.selected {
+            border-color: #4facfe;
+            background: #f0f8ff;
+        }
+
+        .payment-method i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: #4facfe;
+        }
+
+        .payment-form {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .payment-form.active {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 15px;
+        }
+
+        .pay-button {
+            width: 100%;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 18px;
+            border-radius: 15px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .pay-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(79, 172, 254, 0.3);
+        }
+
+        .pay-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .security-info {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .security-info i {
+            margin-right: 8px;
+            color: #28a745;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4facfe;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success-message, .error-message {
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .payment-container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .payment-header {
+                padding: 20px;
+            }
+            
+            .payment-header h1 {
+                font-size: 2rem;
+            }
+            
+            .payment-content {
+                padding: 20px;
+            }
+            
+            .payment-methods {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+            
+            .payment-header h1 {
+                font-size: 1.8rem;
+            }
+            
+            .amount-display {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="payment-container">
+        <div class="payment-header">
+            <h1><i class="fas fa-credit-card"></i> Secure Payment</h1>
+            <p>Complete your transaction safely and securely</p>
+        </div>
+        
+        <div class="payment-content">
+            <div class="payment-summary">
+                <div class="amount-display" id="amount-display">$99.99 USD</div>
+                <p>Transaction expires in <span id="timer">15:00</span></p>
+            </div>
+            
+            <h3 style="margin-bottom: 20px; color: #2c3e50;">Choose Payment Method</h3>
+            
+            <div class="payment-methods" id="payment-methods">
+                <!-- Payment methods will be populated by JavaScript -->
+            </div>
+            
+            <!-- Credit Card Form -->
+            <div class="payment-form" id="credit_card_form">
+                <h4 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fas fa-credit-card"></i> Card Information
+                </h4>
+                <div class="form-group">
+                    <label for="card_number">Card Number</label>
+                    <input type="text" id="card_number" placeholder="1234 5678 9012 3456" maxlength="19">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="expiry_date">Expiry Date</label>
+                        <input type="text" id="expiry_date" placeholder="MM/YY" maxlength="5">
+                    </div>
+                    <div class="form-group">
+                        <label for="cvv">CVV</label>
+                        <input type="text" id="cvv" placeholder="123" maxlength="4">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="cardholder_name">Cardholder Name</label>
+                    <input type="text" id="cardholder_name" placeholder="John Doe">
+                </div>
+            </div>
+            
+            <!-- PayPal Form -->
+            <div class="payment-form" id="paypal_form">
+                <h4 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fab fa-paypal"></i> PayPal Information
+                </h4>
+                <div class="form-group">
+                    <label for="paypal_email">PayPal Email</label>
+                    <input type="email" id="paypal_email" placeholder="your@email.com">
+                </div>
+            </div>
+            
+            <!-- Bank Transfer Form -->
+            <div class="payment-form" id="bank_transfer_form">
+                <h4 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fas fa-university"></i> Bank Transfer Information
+                </h4>
+                <div class="form-group">
+                    <label for="account_number">Account Number</label>
+                    <input type="text" id="account_number" placeholder="123456789">
+                </div>
+                <div class="form-group">
+                    <label for="routing_number">Routing Number</label>
+                    <input type="text" id="routing_number" placeholder="021000021">
+                </div>
+                <div class="form-group">
+                    <label for="account_holder">Account Holder Name</label>
+                    <input type="text" id="account_holder" placeholder="John Doe">
+                </div>
+            </div>
+            
+            <!-- Digital Wallet Forms -->
+            <div class="payment-form" id="apple_pay_form">
+                <h4 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fab fa-apple"></i> Apple Pay
+                </h4>
+                <p style="text-align: center; color: #6c757d; margin: 20px 0;">
+                    Touch ID or Face ID will be used to authenticate your payment
+                </p>
+            </div>
+            
+            <div class="payment-form" id="google_pay_form">
+                <h4 style="margin-bottom: 20px; color: #2c3e50;">
+                    <i class="fab fa-google"></i> Google Pay
+                </h4>
+                <p style="text-align: center; color: #6c757d; margin: 20px 0;">
+                    Your saved payment method will be used
+                </p>
+            </div>
+            
+            <button class="pay-button" id="pay-button" onclick="processPayment()">
+                <i class="fas fa-lock"></i> Complete Payment
+            </button>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Processing your payment...</p>
+            </div>
+            
+            <div class="success-message" id="success-message">
+                <i class="fas fa-check-circle"></i> Payment completed successfully!
+            </div>
+            
+            <div class="error-message" id="error-message">
+                <i class="fas fa-exclamation-triangle"></i> <span id="error-text">Payment failed. Please try again.</span>
+            </div>
+            
+            <div class="security-info">
+                <i class="fas fa-shield-alt"></i>
+                Your payment information is encrypted and secure
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTransaction = null;
+        let selectedPaymentMethod = null;
+        let adaptiveConfig = {};
+
+        // Initialize the payment interface
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAdaptiveConfig();
+            loadPaymentMethods();
+            createTransaction();
+            startTimer();
+        });
+
+        async function loadAdaptiveConfig() {
+            try {
+                const response = await fetch('/api/adaptive-config');
+                adaptiveConfig = await response.json();
+                applyAdaptiveStyles();
+            } catch (error) {
+                console.error('Failed to load adaptive config:', error);
+            }
+        }
+
+        function applyAdaptiveStyles() {
+            const container = document.querySelector('.payment-container');
+            const methods = document.querySelector('.payment-methods');
+            
+            if (adaptiveConfig.device_type === 'mobile') {
+                container.style.margin = '10px';
+                methods.style.gridTemplateColumns = '1fr';
+            } else if (adaptiveConfig.device_type === 'tablet') {
+                methods.style.gridTemplateColumns = 'repeat(2, 1fr)';
+            }
+        }
+
+        async function loadPaymentMethods() {
+            try {
+                const response = await fetch('/api/payment-methods');
+                const methods = await response.json();
+                renderPaymentMethods(methods);
+            } catch (error) {
+                console.error('Failed to load payment methods:', error);
+            }
+        }
+
+        function renderPaymentMethods(methods) {
+            const container = document.getElementById('payment-methods');
+            container.innerHTML = '';
+
+            Object.entries(methods).forEach(([key, method]) => {
+                const methodElement = document.createElement('div');
+                methodElement.className = 'payment-method';
+                methodElement.onclick = () => selectPaymentMethod(key);
+                
+                const iconClass = getIconClass(method.icon);
+                methodElement.innerHTML = `
+                    <i class="${iconClass}"></i>
+                    <h4>${method.name}</h4>
+                `;
+                
+                container.appendChild(methodElement);
+            });
+        }
+
+        function getIconClass(icon) {
+            const iconMap = {
+                'credit-card': 'fas fa-credit-card',
+                'paypal': 'fab fa-paypal',
+                'apple': 'fab fa-apple',
+                'google': 'fab fa-google',
+                'bank': 'fas fa-university'
+            };
+            return iconMap[icon] || 'fas fa-credit-card';
+        }
+
+        function selectPaymentMethod(method) {
+            // Remove previous selection
+            document.querySelectorAll('.payment-method').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            // Hide all forms
+            document.querySelectorAll('.payment-form').forEach(form => {
+                form.classList.remove('active');
+            });
+            
+            // Select new method
+            event.currentTarget.classList.add('selected');
+            selectedPaymentMethod = method;
+            
+            // Show corresponding form
+            const form = document.getElementById(method + '_form');
+            if (form) {
+                form.classList.add('active');
+            }
+            
+            // Update button text
+            const button = document.getElementById('pay-button');
+            button.innerHTML = `<i class="fas fa-lock"></i> Pay with ${getMethodName(method)}`;
+        }
+
+        function getMethodName(method) {
+            const names = {
+                'credit_card': 'Card',
+                'paypal': 'PayPal',
+                'apple_pay': 'Apple Pay',
+                'google_pay': 'Google Pay',
+                'bank_transfer': 'Bank Transfer'
+            };
+            return names[method] || 'Selected Method';
+        }
+
+        async function createTransaction() {
+            try {
+                const response = await fetch('/api/create-transaction', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        amount: 99.99,
+                        currency: 'USD',
+                        payment_method: 'credit_card'
+                    })
+                });
+                
+                currentTransaction = await response.json();
+                updateAmountDisplay();
+            } catch (error) {
+                console.error('Failed to create transaction:', error);
+            }
+        }
+
+        function updateAmountDisplay() {
+            if (currentTransaction) {
+                document.getElementById('amount-display').textContent = 
+                    `$${currentTransaction.amount} ${currentTransaction.currency}`;
+            }
+        }
+
+        function startTimer() {
+            let timeLeft = 15 * 60; // 15 minutes in seconds
+            
+            const timer = setInterval(() => {
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                
+                document.getElementById('timer').textContent = 
+                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    showError('Transaction expired. Please refresh to start over.');
+                    document.getElementById('pay-button').disabled = true;
+                }
+                
+                timeLeft--;
+            }, 1000);
+        }
+
+        async function processPayment() {
+            if (!selectedPaymentMethod) {
+                showError('Please select a payment method');
+                return;
+            }
+            
+            const paymentData = collectPaymentData();
+            if (!paymentData) {
+                showError('Please fill in all required fields');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/process-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        transaction_id: currentTransaction.id,
+                        payment_data: paymentData
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showSuccess();
+                } else {
+                    showError(result.error || 'Payment failed');
+                }
+            } catch (error) {
+                showError('Network error. Please try again.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function collectPaymentData() {
+            const data = {};
+            
+            if (selectedPaymentMethod === 'credit_card') {
+                data.card_number = document.getElementById('card_number').value;
+                data.expiry_date = document.getElementById('expiry_date').value;
+                data.cvv = document.getElementById('cvv').value;
+                data.cardholder_name = document.getElementById('cardholder_name').value;
+                
+                if (!data.card_number || !data.expiry_date || !data.cvv || !data.cardholder_name) {
+                    return null;
+                }
+            } else if (selectedPaymentMethod === 'paypal') {
+                data.email = document.getElementById('paypal_email').value;
+                if (!data.email) return null;
+            } else if (selectedPaymentMethod === 'bank_transfer') {
+                data.account_number = document.getElementById('account_number').value;
+                data.routing_number = document.getElementById('routing_number').value;
+                data.account_holder = document.getElementById('account_holder').value;
+                
+                if (!data.account_number || !data.routing_number || !data.account_holder) {
+                    return null;
+                }
+            }
+            
+            return data;
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('active', show);
+            document.getElementById('pay-button').style.display = show ? 'none' : 'block';
+        }
+
+        function showSuccess() {
+            document.getElementById('success-message').style.display = 'block';
+            document.getElementById('pay-button').style.display = 'none';
+        }
+
+        function showError(message) {
+            document.getElementById('error-text').textContent = message;
+            document.getElementById('error-message').style.display = 'block';
+        }
+
+        // Input formatting
+        document.addEventListener('input', function(e) {
+            if (e.target.id === 'card_number') {
+                e.target.value = e.target.value.replace(/\s/g, '').replace(/(.{4})/g, '$1 ').trim();
+            } else if (e.target.id === 'expiry_date') {
+                e.target.value = e.target.value.replace(/\D/g, '').replace(/(\d{2})(\d)/, '$1/$2');
+            } else if (e.target.id === 'cvv') {
+                e.target.value = e.target.value.replace(/\D/g, '');
+            }
+        });
+    </script>
+</body>
+</html>
