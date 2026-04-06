@@ -1,0 +1,178 @@
+{
+  "schema_version": "0.1.0-draft",
+  "product": {
+    "id": "string",
+    "sku": "string",
+    "title": "string",
+    "brand": "string",
+    "price": {
+      "amount": 0,
+      "currency": "USD",
+      "formatted": "$0.00"
+    },
+    "inventory": {
+      "status": "in_stock",
+      "quantity": 0,
+      "eta_message": "string"
+    }
+  },
+  "media": {
+    "items": [
+      {
+        "id": "media_1",
+        "type": "image",
+        "url": "https://cdn.example.com/image.jpg",
+        "thumbnail_url": "https://cdn.example.com/thumb.jpg",
+        "alt_text": "Front view of product",
+        "label": "size",
+        "position": 1,
+        "is_primary": true,
+        "duration_seconds": null
+      }
+    ],
+    "required_labels_by_category": {
+      "default": [
+        "size",
+        "in_use",
+        "detail",
+        "included"
+      ]
+    }
+  },
+  "highlights": {
+    "bullets": [
+      "string"
+    ],
+    "quick_specs": [
+      {
+        "key": "power_watts",
+        "label": "Power",
+        "value": "1200",
+        "unit": "W",
+        "normalized_value": 1200
+      }
+    ]
+  },
+  "specifications": {
+    "groups": [
+      {
+        "group_key": "dimensions",
+        "group_label": "Dimensions",
+        "attributes": [
+          {
+            "key": "height_mm",
+            "label": "Height",
+            "value": "250",
+            "unit": "mm",
+            "normalized_value": 250,
+            "is_missing": false,
+            "compare_priority": 1
+          }
+        ]
+      }
+    ],
+    "last_updated": "2026-04-06T00:00:00Z",
+    "source": "pim"
+  },
+  "reviews": {
+    "summary": {
+      "average_rating": 4.4,
+      "review_count": 328,
+      "verified_purchase_percent": 82,
+      "common_pros": [
+        "Easy setup"
+      ],
+      "common_cons": [
+        "Louder than expected"
+      ]
+    },
+    "items": [
+      {
+        "id": "review_1",
+        "title": "string",
+        "body": "string",
+        "rating": 5,
+        "author_name": "string",
+        "created_at": "2026-04-06T00:00:00Z",
+        "verified_purchase": true,
+        "helpful_votes": 0
+      }
+    ]
+  },
+  "qa": {
+    "items": [
+      {
+        "id": "qa_1",
+        "question": "Does this fit model X?",
+        "asked_at": "2026-04-06T00:00:00Z",
+        "answers": [
+          {
+            "id": "qa_a1",
+            "answer": "Yes, if you use adapter Y.",
+            "author_type": "manufacturer",
+            "upvotes": 12,
+            "created_at": "2026-04-06T00:00:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "compare": {
+    "comparable_fields": [
+      "price",
+      "dimensions.height_mm",
+      "compatibility.models",
+      "performance.max_output",
+      "warranty.term_months"
+    ],
+    "max_products": 4
+  },
+  "recommendations": {
+    "frequently_bought_together": [
+      {
+        "product_id": "string",
+        "reason_code": "bundle_history",
+        "position": 1
+      }
+    ],
+    "compatible_accessories": [
+      {
+        "product_id": "string",
+        "compatibility_status": "guaranteed_fit",
+        "required_selection": null
+      }
+    ],
+    "alternatives": [
+      {
+        "product_id": "string",
+        "reason_code": "higher_performance",
+        "why_consider": "25% higher output"
+      }
+    ]
+  },
+  "compliance": {
+    "notices": [
+      {
+        "id": "cmp_1",
+        "severity": "warning",
+        "title": "Shipping restriction",
+        "summary": "Cannot ship to PO boxes.",
+        "detail": "Full legal text here.",
+        "region_codes": [
+          "US"
+        ],
+        "blocking": false,
+        "source": "legal_service",
+        "last_updated": "2026-04-06T00:00:00Z"
+      }
+    ]
+  },
+  "analytics": {
+    "pdp_context": {
+      "product_id": "string",
+      "category_id": "string",
+      "device_type": "desktop",
+      "market": "US"
+    }
+  }
+}
