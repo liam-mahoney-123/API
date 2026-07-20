@@ -1,0 +1,492 @@
+// digital-upgrade-sim-swap-service/src/index.ts
+// Digital Plan Upgrade & SIM Swap — MySingtel Backend Service
+
+import { BSSClient, ProvisioningGateway, CRMAdapter } from '@singtel/bss-sdk';
+import { BiometricVerifier, OTPService } from '@singtel/identity';
+import { eSIMProfileManager, QRCodeGenerator } from '@singtel/esim-provisioning';
+
+// ─── 1. PERSONALIZED PLAN COMPARISON ENGINE ─────────────────────────────────
+
+interface CustomerContext {
+  msisdn: string;
+  accountId: string;
+  currentPlan: Plan;
+  tenure: number; // months
+  usageProfile: UsageProfile;
+  eligibility: EligibilityResult;
+  segment: 'consumer' | 'business';
+  contractStatus: 'in-contract' | 'out-of-contract' | 'month-to-month';
+}
+
+interface PlanRecommendation {
+  plan: Plan;
+  score: number;
+  savingsEstimate: number;
+  dataUplift: number;
+  reasoning: string[];
+}
+
+export class PlanComparisonEngine {
+  private readonly eligibilityService: EligibilityService;
+  private readonly usageAnalyzer: UsageAnalyzer;
+
+  async getPersonalizedRecommendations(ctx: CustomerContext): Promise<PlanRecommendation[]> {
+    const [usage, offers, tenure_benefits] = await Promise.all([
+      this.usageAnalyzer.getTrailingUsage(ctx.msisdn, 3), // 3-month lookback
+      this.fetchEligibleOffers(ctx),
+      this.getTenureIncentives(ctx.tenure, ctx.segment),
+    ]);
+
+    const scored = offers.map(plan => ({
+      plan,
+      score: this.scoreRelevance(plan, usage, ctx),
+      savingsEstimate: this.calculateProration(ctx.currentPlan, plan),
+      dataUplift: plan.dataAllowance - ctx.currentPlan.dataAllowance,
+      reasoning: this.buildReasoningChain(plan, usage, tenure_benefits),
+    }));
+
+    return scored
+      .filter(r => r.score > 0.4)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }
+
+  private scoreRelevance(plan: Plan, usage: UsageProfile, ctx: CustomerContext): number {
+    let score = 0;
+    if (usage.avgDataGB > ctx.currentPlan.dataAllowance * 0.8) score += 0.3;
+    if (plan.price <= ctx.currentPlan.price * 1.15) score += 0.25;
+    if (ctx.tenure > 24) score += 0.15; // loyalty weighting
+    if (ctx.contractStatus === 'out-of-contract') score += 0.2;
+    return Math.min(score, 1.0);
+  }
+}
+
+// ─── 2. END-TO-END DIGITAL UPGRADE FLOW ─────────────────────────────────────
+
+type UpgradeState =
+  | 'initiated' | 'plan_selected' | 'contract_acknowledged'
+  | 'proration_confirmed' | 'effective_date_set' | 'provisioning'
+  | 'activated' | 'failed' | 'rolled_back';
+
+interface UpgradeOrder {
+  orderId: string;
+  customerId: string;
+  fromPlan: Plan;
+  toPlan: Plan;
+  state: UpgradeState;
+  effectiveDate: Date;
+  prorationAmount: number;
+  contractTerms: ContractAcknowledgment;
+  createdAt: Date;
+  activatedAt?: Date;
+}
+
+export class DigitalUpgradeOrchestrator {
+  private readonly bss: BSSClient;
+  private readonly crm: CRMAdapter;
+  private readonly provisioning: ProvisioningGateway;
+
+  async initiateUpgrade(req: UpgradeRequest): Promise<UpgradeOrder> {
+    // Validate eligibility before creating order
+    const eligibility = await this.checkUpgradeEligibility(req.customerId, req.targetPlan);
+    if (!eligibility.eligible) {
+      throw new UpgradeBlockedError(eligibility.reason, eligibility.fallbackChannel);
+    }
+
+    const order: UpgradeOrder = {
+      orderId: generateOrderId(),
+      customerId: req.customerId,
+      fromPlan: req.currentPlan,
+      toPlan: req.targetPlan,
+      state: 'initiated',
+      effectiveDate: req.effectiveDate ?? new Date(), // immediate or scheduled
+      prorationAmount: await this.bss.calculateProration(req),
+      contractTerms: await this.buildContractTerms(req),
+      createdAt: new Date(),
+    };
+
+    await this.persistOrder(order);
+    return order;
+  }
+
+  async confirmAndActivate(orderId: string, acknowledgment: ContractAcknowledgment): Promise<UpgradeOrder> {
+    const order = await this.getOrder(orderId);
+
+    // State machine progression with rollback on failure
+    try {
+      order.state = 'contract_acknowledged';
+      await this.bss.lockPlanChange(order);
+
+      order.state = 'proration_confirmed';
+      await this.bss.applyProration(order.customerId, order.prorationAmount);
+
+      order.state = 'provisioning';
+      await this.provisioning.activatePlan(order.customerId, order.toPlan, order.effectiveDate);
+
+      order.state = 'activated';
+      order.activatedAt = new Date();
+      await this.crm.recordUpgrade(order);
+      await this.sendConfirmation(order);
+
+      return order;
+    } catch (error) {
+      order.state = 'failed';
+      await this.rollback(order, error);
+      throw new ActivationFailedError(order.orderId, error);
+    }
+  }
+
+  private async rollback(order: UpgradeOrder, error: Error): Promise<void> {
+    console.error(`[Rollback] Order ${order.orderId} failed at state ${order.state}`, error);
+    await this.bss.reverseProration(order.customerId, order.prorationAmount);
+    await this.bss.unlockPlanChange(order);
+    order.state = 'rolled_back';
+    await this.persistOrder(order);
+    await this.notifyCustomerOfFailure(order);
+  }
+}
+
+// ─── 3. eSIM PROVISIONING (QR + DIRECT CARRIER ACTIVATION) ──────────────────
+
+interface eSIMProvisioningResult {
+  profileId: string;
+  activationMethod: 'qr_code' | 'direct_carrier_push';
+  qrPayload?: string; // SM-DP+ activation code
+  status: 'pending_download' | 'downloaded' | 'installed' | 'active';
+  iccid: string;
+  eid: string;
+}
+
+export class eSIMProvisioningService {
+  private readonly profileManager: eSIMProfileManager;
+  private readonly qrGenerator: QRCodeGenerator;
+
+  async provisioneSIM(
+    customerId: string,
+    deviceInfo: DeviceInfo,
+    targetMsisdn: string
+  ): Promise<eSIMProvisioningResult> {
+
+    const activationMethod = this.determineActivationMethod(deviceInfo);
+    const profile = await this.profileManager.allocateProfile(targetMsisdn);
+
+    if (activationMethod === 'direct_carrier_push') {
+      // iOS 16+ / Samsung Galaxy S21+ support direct push
+      await this.profileManager.pushToDevice(profile.profileId, deviceInfo.eid);
+      return {
+        profileId: profile.profileId,
+        activationMethod: 'direct_carrier_push',
+        status: 'pending_download',
+        iccid: profile.iccid,
+        eid: deviceInfo.eid,
+      };
+    }
+
+    // Fallback: QR code activation
+    const qrPayload = await this.qrGenerator.generateActivationCode(profile);
+    return {
+      profileId: profile.profileId,
+      activationMethod: 'qr_code',
+      qrPayload,
+      status: 'pending_download',
+      iccid: profile.iccid,
+      eid: deviceInfo.eid,
+    };
+  }
+
+  private determineActivationMethod(device: DeviceInfo): 'qr_code' | 'direct_carrier_push' {
+    if (device.platform === 'ios' && device.osVersion >= 16) return 'direct_carrier_push';
+    if (device.platform === 'android' && device.supportsCarrierPush) return 'direct_carrier_push';
+    return 'qr_code';
+  }
+}
+
+// ─── 4. DEVICE COMPATIBILITY CHECKS ─────────────────────────────────────────
+
+interface CompatibilityResult {
+  compatible: boolean;
+  eSIMSupported: boolean;
+  dualSIMCapable: boolean;
+  carrierLocked: boolean;
+  recommendedPath: 'direct_push' | 'qr_code' | 'physical_sim_only' | 'store_visit_required';
+  issues: CompatibilityIssue[];
+  guidance: string[];
+}
+
+export class DeviceCompatibilityChecker {
+  private readonly deviceDb: DeviceDatabase;
+  private readonly carrierBundleRegistry: CarrierBundleRegistry;
+
+  async checkCompatibility(
+    imei: string,
+    currentSimType: 'physical' | 'esim',
+    targetSimType: 'physical' | 'esim'
+  ): Promise<CompatibilityResult> {
+
+    const device = await this.deviceDb.lookupByIMEI(imei);
+    if (!device) {
+      return this.unknownDeviceResult();
+    }
+
+    const issues: CompatibilityIssue[] = [];
+    const guidance: string[] = [];
+
+    // Check eSIM hardware support
+    const eSIMSupported = device.eSIMCapable && device.eid !== null;
+    if (targetSimType === 'esim' && !eSIMSupported) {
+      issues.push({ code: 'NO_ESIM_HW', severity: 'blocker', message: 'Device does not support eSIM' });
+    }
+
+    // Check carrier lock status
+    const lockStatus = await this.checkCarrierLock(imei);
+    if (lockStatus.locked && lockStatus.carrier !== 'singtel') {
+      issues.push({ code: 'CARRIER_LOCKED', severity: 'blocker', message: 'Device locked to another carrier' });
+    }
+
+    // Check OS version for carrier activation support
+    const bundleSupport = await this.carrierBundleRegistry.checkSupport(device.model, device.osVersion);
+    if (!bundleSupport.supported) {
+      guidance.push(`Update to ${bundleSupport.minimumVersion} or later for best experience`);
+    }
+
+    // Check dual-SIM scenarios
+    const dualSIMCapable = device.simSlots > 1 || (eSIMSupported && device.physicalSimSlots >= 1);
+
+    const recommendedPath = this.determineRecommendedPath(eSIMSupported, issues, device);
+
+    return {
+      compatible: issues.filter(i => i.severity === 'blocker').length === 0,
+      eSIMSupported,
+      dualSIMCapable,
+      carrierLocked: lockStatus.locked,
+      recommendedPath,
+      issues,
+      guidance,
+    };
+  }
+}
+
+// ─── 5. SIM SWAP FRAUD PREVENTION ───────────────────────────────────────────
+
+interface FraudAssessment {
+  riskScore: number; // 0-100
+  decision: 'allow' | 'step_up' | 'cooldown' | 'block' | 'manual_review';
+  requiredVerification: VerificationStep[];
+  cooldownEndsAt?: Date;
+  reason?: string;
+}
+
+type VerificationStep = 'biometric_face' | 'biometric_fingerprint' | 'otp_sms' | 'otp_email' | 'security_questions';
+
+export class SIMSwapFraudEngine {
+  private readonly biometric: BiometricVerifier;
+  private readonly otpService: OTPService;
+
+  private readonly COOLDOWN_HOURS = 24;
+  private readonly MAX_ATTEMPTS_PER_DAY = 3;
+  private readonly HIGH_RISK_THRESHOLD = 70;
+
+  async assessSwapRisk(customerId: string, request: SIMSwapRequest): Promise<FraudAssessment> {
+    const signals = await this.gatherRiskSignals(customerId, request);
+    const riskScore = this.calculateRiskScore(signals);
+
+    // Check active cooldown
+    const activeCooldown = await this.getActiveCooldown(customerId);
+    if (activeCooldown) {
+      return {
+        riskScore,
+        decision: 'cooldown',
+        requiredVerification: [],
+        cooldownEndsAt: activeCooldown.expiresAt,
+        reason: 'Recent SIM swap attempt triggered cooldown period',
+      };
+    }
+
+    // Velocity check
+    const recentAttempts = await this.getRecentAttempts(customerId, 24);
+    if (recentAttempts >= this.MAX_ATTEMPTS_PER_DAY) {
+      return { riskScore: 100, decision: 'block', requiredVerification: [], reason: 'Velocity limit exceeded' };
+    }
+
+    if (riskScore >= this.HIGH_RISK_THRESHOLD) {
+      return { riskScore, decision: 'manual_review', requiredVerification: ['biometric_face', 'otp_sms', 'otp_email'] };
+    }
+
+    if (riskScore >= 40) {
+      return { riskScore, decision: 'step_up', requiredVerification: ['biometric_fingerprint', 'otp_sms'] };
+    }
+
+    return { riskScore, decision: 'allow', requiredVerification: ['otp_sms'] };
+  }
+
+  private async gatherRiskSignals(customerId: string, req: SIMSwapRequest): Promise<RiskSignals> {
+    return {
+      recentPasswordChange: await this.checkRecentCredentialChange(customerId, 72), // last 72h
+      recentContactChange: await this.checkRecentContactChange(customerId, 72),
+      newDeviceFingerprint: !await this.isKnownDevice(customerId, req.deviceFingerprint),
+      unusualLocation: await this.checkGeolocationAnomaly(customerId, req.ipAddress),
+      accountAge: await this.getAccountAge(customerId),
+      previousFraudFlags: await this.getPreviousFraudFlags(customerId),
+    };
+  }
+
+  async executeVerification(customerId: string, steps: VerificationStep[]): Promise<VerificationResult> {
+    const results = [];
+    for (const step of steps) {
+      switch (step) {
+        case 'biometric_face':
+        case 'biometric_fingerprint':
+          results.push(await this.biometric.verify(customerId, step));
+          break;
+        case 'otp_sms':
+        case 'otp_email':
+          results.push(await this.otpService.sendAndVerify(customerId, step));
+          break;
+      }
+      // Fail fast on any step failure
+      if (!results[results.length - 1].success) {
+        await this.triggerCooldown(customerId, this.COOLDOWN_HOURS);
+        return { verified: false, failedStep: step };
+      }
+    }
+    return { verified: true };
+  }
+}
+
+// ─── 6. BSS INTEGRATION (BILLING, PROVISIONING, CRM) ────────────────────────
+
+interface ActivationEvent {
+  eventId: string;
+  msisdn: string;
+  type: 'plan_upgrade' | 'sim_swap' | 'esim_activation';
+  timestamp: Date;
+  systems: SystemActivationStatus[];
+}
+
+interface SystemActivationStatus {
+  system: 'billing' | 'provisioning' | 'crm' | 'number_management';
+  status: 'pending' | 'success' | 'failed' | 'compensated';
+  latencyMs: number;
+}
+
+export class BSSIntegrationOrchestrator {
+  private readonly billing: BillingSystem;
+  private readonly provisioning: ProvisioningSystem;
+  private readonly crm: CRMSystem;
+  private readonly numberMgmt: NumberManagementSystem;
+
+  async activateInRealTime(order: UpgradeOrder, simSwap?: SIMSwapRequest): Promise<ActivationEvent> {
+    const event: ActivationEvent = {
+      eventId: generateEventId(),
+      msisdn: order.customerId,
+      type: simSwap ? 'sim_swap' : 'plan_upgrade',
+      timestamp: new Date(),
+      systems: [],
+    };
+
+    // Saga pattern: ordered activation with compensation on failure
+    const saga = new ActivationSaga(event.eventId);
+
+    try {
+      // Step 1: Reserve in billing
+      saga.addStep({
+        execute: () => this.billing.reservePlanChange(order),
+        compensate: () => this.billing.releaseReservation(order),
+      });
+
+      // Step 2: Provision network element
+      saga.addStep({
+        execute: () => this.provisioning.activateSubscription(order, simSwap?.newIccid),
+        compensate: () => this.provisioning.rollbackSubscription(order),
+      });
+
+      // Step 3: Update CRM record
+      saga.addStep({
+        execute: () => this.crm.updateSubscription(order),
+        compensate: () => this.crm.revertSubscription(order),
+      });
+
+      // Step 4: Number management (if SIM swap)
+      if (simSwap) {
+        saga.addStep({
+          execute: () => this.numberMgmt.reassignToNewSIM(order.customerId, simSwap.newIccid),
+          compensate: () => this.numberMgmt.reassignToNewSIM(order.customerId, simSwap.oldIccid),
+        });
+      }
+
+      event.systems = await saga.execute();
+      return event;
+
+    } catch (error) {
+      // Compensating transactions for partial failures
+      await saga.compensate();
+      throw new BSSActivationError(event, error);
+    }
+  }
+}
+
+// ─── ENTRY POINT: FULL UPGRADE + SIM SWAP FLOW ──────────────────────────────
+
+export class DigitalUpgradeAndSIMSwapService {
+  constructor(
+    private readonly plans: PlanComparisonEngine,
+    private readonly upgrade: DigitalUpgradeOrchestrator,
+    private readonly esim: eSIMProvisioningService,
+    private readonly compatibility: DeviceCompatibilityChecker,
+    private readonly fraud: SIMSwapFraudEngine,
+    private readonly bss: BSSIntegrationOrchestrator,
+  ) {}
+
+  async executeFullFlow(customer: CustomerContext, request: FullUpgradeRequest): Promise<FlowResult> {
+    // 1. Check device compatibility
+    const compat = await this.compatibility.checkCompatibility(
+      request.imei, request.currentSimType, 'esim'
+    );
+    if (!compat.compatible) {
+      return { success: false, stage: 'compatibility', issues: compat.issues };
+    }
+
+    // 2. Fraud assessment for SIM swap
+    const riskAssessment = await this.fraud.assessSwapRisk(customer.accountId, request.simSwap);
+    if (riskAssessment.decision === 'block') {
+      return { success: false, stage: 'fraud_prevention', reason: riskAssessment.reason };
+    }
+
+    // 3. Step-up verification if needed
+    if (riskAssessment.requiredVerification.length > 0) {
+      const verification = await this.fraud.executeVerification(
+        customer.accountId, riskAssessment.requiredVerification
+      );
+      if (!verification.verified) {
+        return { success: false, stage: 'verification', failedStep: verification.failedStep };
+      }
+    }
+
+    // 4. Create upgrade order
+    const order = await this.upgrade.initiateUpgrade({
+      customerId: customer.accountId,
+      currentPlan: customer.currentPlan,
+      targetPlan: request.targetPlan,
+      effectiveDate: request.effectiveDate,
+    });
+
+    // 5. Confirm and activate via BSS
+    const activation = await this.bss.activateInRealTime(order, request.simSwap);
+
+    // 6. Provision eSIM
+    const esimResult = await this.esim.provisioneSIM(
+      customer.accountId,
+      request.deviceInfo,
+      customer.msisdn,
+    );
+
+    return {
+      success: true,
+      stage: 'complete',
+      order,
+      activation,
+      esimResult,
+      recommendedPath: compat.recommendedPath,
+    };
+  }
+}
