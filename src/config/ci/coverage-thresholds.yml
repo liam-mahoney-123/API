@@ -1,0 +1,12 @@
+# Q3 Launch - Test Coverage Requirements
+# These gates must pass before merge to main
+
+coverage:
+  unit_test_minimum: 85
+  integration_test_minimum: 70
+  e2e_test_minimum: 50
+
+enforcement:
+  block_merge_on_failure: true
+  report_to_slack: true
+  notify_on_regression: true
